@@ -1,8 +1,11 @@
 import pandas as pd
 import spans
+import matplotlib.pyplot as plt; plt.rcdefaults()
+import numpy as np
 import matplotlib.pyplot as plt
 
 #%% definitions
+LOCATION_KEY = 'location'
 POS_KEY = 'pos'
 CHROM_KEY = 'chr'
 STOP_KEY = 'stop'
@@ -23,7 +26,7 @@ methyalation_df.columns=[CHROM_KEY, START_KEY, STOP_KEY]
 
 #%% filter inputs
 autosomal_chrom = set()
-for i in range(3):  # TODO: range to 22
+for i in range(22):
     autosomal_chrom.add('chr' + str(i + 1))
 
 
@@ -96,11 +99,50 @@ def detemine_methylation_location(chrom, pos, chrom_interval_dict):
     raise LookupError(f'There is no position {str(pos)} in chromosome {chrom}.')
 
 
-methyalation_df['location'] = methyalation_df.apply(
+methyalation_df[LOCATION_KEY] = methyalation_df.apply(
     lambda row: detemine_methylation_location(row[CHROM_KEY], row[POS_KEY], chrom_interval_dict), axis=1)
 
-#%% collect statistics about methylations locations and plot
-methyalation_df['location'].hist()
+#%% collect statistics about methylations locations
+
+def count_methylations_in_area(methyalation_df, area):
+    return sum(methyalation_df[LOCATION_KEY] == area)
+
+
+areas = (ISLAND_KEY, SHORE_KEY, SHELF_KEY, SEA_KEY)
+count = []
+for area in areas:
+    count.append(count_methylations_in_area(methyalation_df, area))
+
+#%% plot results
+
+def autolabel(rects):
+    """Attach a text label above each bar in *rects*, displaying its height."""
+    for rect in rects:
+        height = rect.get_height()
+        ax.annotate('{}'.format(height),
+                    xy=(rect.get_x() + rect.get_width() / 2, height),
+                    xytext=(0, 3),  # 3 points vertical offset
+                    textcoords="offset points",
+                    ha='center', va='bottom')
+
+
+x = np.arange(len(areas))  # the label locations
+width = 0.6  # the width of the bars
+
+fig, ax = plt.subplots()
+rects = ax.bar(x, count, width)
+
+# Add some text for labels, title and custom x-axis tick labels, etc.
+ax.set_ylabel('Number of methylations')
+ax.set_title('Number of methylations in each area')
+ax.set_xticks(x)
+ax.set_xticklabels(areas)
+# ax.legend()
+
+autolabel(rects)
+
+fig.tight_layout()
+
 plt.show()
 
 
