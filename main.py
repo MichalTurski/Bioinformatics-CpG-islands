@@ -1,13 +1,25 @@
 import pandas as pd
 import spans
+import matplotlib.pyplot as plt
+
+#%% definitions
+POS_KEY = 'pos'
+CHROM_KEY = 'chr'
+STOP_KEY = 'stop'
+START_KEY = 'start'
+SEA_KEY = 'sea'
+SHELF_KEY = 'shelf'
+SHORE_KEY = 'shore'
+ISLAND_KEY = 'island'
+
 
 #%% read files
 islands_df = pd.read_csv('cpgIslandExt.txt', sep='\t', usecols=[1, 2, 3], header=None)
-islands_df.columns=['chr', 'start', 'stop']
+islands_df.columns=[CHROM_KEY, START_KEY, STOP_KEY]
 lengths_df = pd.read_csv('hg19.chrom.sizes.txt', sep='\t', index_col=0, header=None, squeeze=True)
 lengths = lengths_df.to_dict()
 methyalation_df = pd.read_csv('HAIB.A549.EtOH.Rep.3.bed', sep='\t', usecols=[0, 1, 2], header=None)
-methyalation_df.columns=['chr', 'start', 'stop']
+methyalation_df.columns=[CHROM_KEY, START_KEY, STOP_KEY]
 
 #%% filter inputs
 autosomal_chrom = set()
@@ -16,38 +28,31 @@ for i in range(3):  # TODO: range to 22
 
 
 def filter_autosomal(df, autosomal_chrom):
-    return df[df['chr'].isin(autosomal_chrom)]
+    return df[df[CHROM_KEY].isin(autosomal_chrom)]
 
 
 islands_df = filter_autosomal(islands_df, autosomal_chrom)
 # lengths_df = filter_autosomal(lengths_df, autosomal_chrom)
 methyalation_df = filter_autosomal(methyalation_df, autosomal_chrom)
 
-#%% find islands, shores, shelves and seas
+#%% find islands, shores, shelves and seas: function definitions
 
+def add_to_interval(interval, start, stop, dilation, chrom_borders):
+    interval.add(spans.intrange(start - dilation, stop + dilation).intersection(chrom_borders))
 
 def intervals_for_chrom(islands_chrom_df, chrom_len):
-    # Border numbers section:
     shore_limit = 2000
-    shelf_limit =  shore_limit + 2000
-
+    shelf_limit = shore_limit + 2000
     chrom_interval = spans.intrange(0, chrom_len)
-    intervals = {'sea': spans.intrangeset([chrom_interval]), 'shelf': spans.intrangeset([]),
-                 'shore': spans.intrangeset([]), 'island': spans.intrangeset([])}
+    intervals = {SEA_KEY: spans.intrangeset([chrom_interval]), SHELF_KEY: spans.intrangeset([]),
+                 SHORE_KEY: spans.intrangeset([]), ISLAND_KEY: spans.intrangeset([])}
     for _, island in islands_chrom_df.iterrows():
-        intervals['island'].add(spans.intrange(island['start'], island['stop']).intersection(chrom_interval))
-        intervals['shore'].add(spans.intrange(island['start'] - shore_limit, island['stop'] + shore_limit)
-                               .intersection(chrom_interval))
-        intervals['shelf'].add(spans.intrange(island['start'] - shelf_limit, island['stop'] + shelf_limit)
-                               .intersection(chrom_interval))
-    print('done inner loop')
-    intervals['sea'] = intervals['sea'].difference(intervals['shelf'])
-    print('done sea interval')
-    intervals['shelf'] = intervals['shelf'].difference(intervals['shore'])
-    print('done shelf interval')
-    intervals['shore'] = intervals['shore'].difference(intervals['island'])
-    print('done shore interval')
-
+        add_to_interval(intervals[ISLAND_KEY], island[START_KEY], island[STOP_KEY], 0, chrom_interval)
+        add_to_interval(intervals[SHORE_KEY], island[START_KEY], island[STOP_KEY], shore_limit, chrom_interval)
+        add_to_interval(intervals[SHELF_KEY], island[START_KEY], island[STOP_KEY], shelf_limit, chrom_interval)
+    intervals[SEA_KEY] = intervals[SEA_KEY].difference(intervals[SHELF_KEY])
+    intervals[SHELF_KEY] = intervals[SHELF_KEY].difference(intervals[SHORE_KEY])
+    intervals[SHORE_KEY] = intervals[SHORE_KEY].difference(intervals[ISLAND_KEY])
     return intervals
 
 
@@ -58,35 +63,29 @@ def df_from_interval(interval, chrom):
     df = pd.DataFrame(fragments_list)
     return df
 
+#%% find islands, shores, shelves and seas
 
-dfs = {'island': [], 'shore': [], 'shelf': [], 'sea': []}
+
+region_chrom_dfs = {ISLAND_KEY: [], SHORE_KEY: [], SHELF_KEY: [], SEA_KEY: []}
 chrom_interval_dict = {}
 for chrom in autosomal_chrom:
-    islands_chrom_df = islands_df[islands_df['chr'] == chrom]
+    islands_chrom_df = islands_df[islands_df[CHROM_KEY] == chrom]
     intervals = intervals_for_chrom(islands_chrom_df, lengths[chrom])
     for key in intervals:
-        dfs[key].append(df_from_interval(intervals[key], chrom))
+        region_chrom_dfs[key].append(df_from_interval(intervals[key], chrom))
     chrom_interval_dict[chrom] = intervals
-    # dfs['island'].append(df_from_interval(island_interval, chrom))
-    # dfs['shore'].append(df_from_interval(shore_interval, chrom))
-    # dfs['shelf'].append(df_from_interval(shelf_interval, chrom))
-    # dfs['sea'].append(df_from_interval(sea_interval, chrom))
 
-
-new_islands_df = pd.concat(dfs['island'])
-shores_df = pd.concat(dfs['shore'])
-shelves_df = pd.concat(dfs['shelf'])
-seas_df = pd.concat(dfs['sea'])
+region_dfs = {}
+for region in region_chrom_dfs:
+    region_dfs[region] = pd.concat(region_chrom_dfs[region])
 
 #%% save results to files
-new_islands_df.to_csv('islands.bed', sep='\t', header=False, index=False)
-shores_df.to_csv('shores.bed', sep='\t', header=False, index=False)
-shelves_df.to_csv('shelves.bed', sep='\t', header=False, index=False)
-seas_df.to_csv('seas.bed', sep='\t', header=False, index=False)
+for region in region_dfs:
+    region_dfs[region].to_csv(f'{region}.bed', sep='\t', header=False, index=False)
 
 #%% calculate methylations positions on chromosomes
-methyalation_df['pos'] = (methyalation_df['stop'] - methyalation_df['start'])/2 + methyalation_df['start']
-methyalation_df['pos'] = methyalation_df['pos'].apply(lambda x: int(x))
+methyalation_df[POS_KEY] = (methyalation_df[STOP_KEY] - methyalation_df[START_KEY]) / 2 + methyalation_df[START_KEY]
+methyalation_df[POS_KEY] = methyalation_df[POS_KEY].apply(lambda x: int(x))
 
 #%% calculate methylations locations in islands/shores/shelves/seas
 def detemine_methylation_location(chrom, pos, chrom_interval_dict):
@@ -98,9 +97,11 @@ def detemine_methylation_location(chrom, pos, chrom_interval_dict):
 
 
 methyalation_df['location'] = methyalation_df.apply(
-    lambda row: detemine_methylation_location(row['chr'], row['pos'], chrom_interval_dict), axis=1)
+    lambda row: detemine_methylation_location(row[CHROM_KEY], row[POS_KEY], chrom_interval_dict), axis=1)
 
-#%%
+#%% collect statistics about methylations locations and plot
+methyalation_df['location'].hist()
+plt.show()
 
 
 
