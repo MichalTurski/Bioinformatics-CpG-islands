@@ -37,9 +37,9 @@ def intervals_for_chrom(islands_chrom_df, chrom_len):
     for _, island in islands_chrom_df.iterrows():
         intervals['island'].add(spans.intrange(island['start'], island['stop']).intersection(chrom_interval))
         intervals['shore'].add(spans.intrange(island['start'] - shore_limit, island['stop'] + shore_limit)
-                           .intersection(chrom_interval))
-        intervals['shelf'].add(spans.intrange(island['start']-shelf_limit, island['stop']+shelf_limit)
-                           .intersection(chrom_interval))
+                               .intersection(chrom_interval))
+        intervals['shelf'].add(spans.intrange(island['start'] - shelf_limit, island['stop'] + shelf_limit)
+                               .intersection(chrom_interval))
     print('done inner loop')
     intervals['sea'] = intervals['sea'].difference(intervals['shelf'])
     print('done sea interval')
@@ -84,9 +84,23 @@ shores_df.to_csv('shores.bed', sep='\t', header=False, index=False)
 shelves_df.to_csv('shelves.bed', sep='\t', header=False, index=False)
 seas_df.to_csv('seas.bed', sep='\t', header=False, index=False)
 
-#%% calculate methylations locations
-methyalation_df['location'] = (methyalation_df['stop'] - methyalation_df['start'])/2 + methyalation_df['start']
-methyalation_df['location'] = methyalation_df['location'].apply(lambda x: int(x))
+#%% calculate methylations positions on chromosomes
+methyalation_df['pos'] = (methyalation_df['stop'] - methyalation_df['start'])/2 + methyalation_df['start']
+methyalation_df['pos'] = methyalation_df['pos'].apply(lambda x: int(x))
+
+#%% calculate methylations locations in islands/shores/shelves/seas
+def detemine_methylation_location(chrom, pos, chrom_interval_dict):
+    intervals = chrom_interval_dict[chrom]
+    for region in intervals:
+        if intervals[region].contains(pos):
+            return region
+    raise LookupError(f'There is no position {str(pos)} in chromosome {chrom}.')
+
+
+methyalation_df['location'] = methyalation_df.apply(
+    lambda row: detemine_methylation_location(row['chr'], row['pos'], chrom_interval_dict), axis=1)
+
+#%%
 
 
 
