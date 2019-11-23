@@ -11,7 +11,7 @@ methyalation_df.columns=['chr', 'start', 'stop']
 
 #%% filter inputs
 autosomal_chrom = set()
-for i in range(22):
+for i in range(3):  # TODO: range to 22
     autosomal_chrom.add('chr' + str(i + 1))
 
 
@@ -32,33 +32,61 @@ def intervals_for_chrom(islands_chrom_df, chrom_len):
     shelf_limit =  shore_limit + 2000
 
     chrom_interval = spans.intrange(0, chrom_len)
-    sea_interval = spans.intrangeset([chrom_interval])
-    shelf_interval = spans.intrangeset([])
-    shore_interval = spans.intrangeset([])
-    island_interval = spans.intrangeset([])
+    intervals = {'sea': spans.intrangeset([chrom_interval]), 'shelf': spans.intrangeset([]),
+                 'shore': spans.intrangeset([]), 'island': spans.intrangeset([])}
     for _, island in islands_chrom_df.iterrows():
-        island_interval.add(spans.intrange(island['start'], island['stop']).intersection(chrom_interval))
-        shore_interval.add(spans.intrange(island['start'] - shore_limit, island['stop'] + shore_limit)
+        intervals['island'].add(spans.intrange(island['start'], island['stop']).intersection(chrom_interval))
+        intervals['shore'].add(spans.intrange(island['start'] - shore_limit, island['stop'] + shore_limit)
                            .intersection(chrom_interval))
-        shelf_interval.add(spans.intrange(island['start']-shelf_limit, island['stop']+shelf_limit)
+        intervals['shelf'].add(spans.intrange(island['start']-shelf_limit, island['stop']+shelf_limit)
                            .intersection(chrom_interval))
     print('done inner loop')
-    sea_interval = sea_interval.difference(shelf_interval)
+    intervals['sea'] = intervals['sea'].difference(intervals['shelf'])
     print('done sea interval')
-    shelf_interval = shelf_interval.difference(shore_interval)
+    intervals['shelf'] = intervals['shelf'].difference(intervals['shore'])
     print('done shelf interval')
-    shore_interval = shore_interval.difference(island_interval)
+    intervals['shore'] = intervals['shore'].difference(intervals['island'])
     print('done shore interval')
 
+    return intervals
 
 
+def df_from_interval(interval, chrom):
+    fragments_list =[]
+    for subinterval in interval:
+        fragments_list.append((chrom, subinterval.lower, subinterval.upper))
+    df = pd.DataFrame(fragments_list)
+    return df
+
+
+dfs = {'island': [], 'shore': [], 'shelf': [], 'sea': []}
+chrom_interval_dict = {}
 for chrom in autosomal_chrom:
-    islands_chrom_df  = islands_df[islands_df['chr'] == chrom]
-    intervals_for_chrom(islands_chrom_df, lengths[chrom])
-    # spans.intrange(0, lengths[chrom])
-    # sea_interval = spans.intrangeset([spans.intrange(0, lengths[chrom])])
-    # shelf_interval = spans.intrangeset([])
-    # shore_interval = spans.intrangeset([])
+    islands_chrom_df = islands_df[islands_df['chr'] == chrom]
+    intervals = intervals_for_chrom(islands_chrom_df, lengths[chrom])
+    for key in intervals:
+        dfs[key].append(df_from_interval(intervals[key], chrom))
+    chrom_interval_dict[chrom] = intervals
+    # dfs['island'].append(df_from_interval(island_interval, chrom))
+    # dfs['shore'].append(df_from_interval(shore_interval, chrom))
+    # dfs['shelf'].append(df_from_interval(shelf_interval, chrom))
+    # dfs['sea'].append(df_from_interval(sea_interval, chrom))
+
+
+new_islands_df = pd.concat(dfs['island'])
+shores_df = pd.concat(dfs['shore'])
+shelves_df = pd.concat(dfs['shelf'])
+seas_df = pd.concat(dfs['sea'])
+
+#%% save results to files
+new_islands_df.to_csv('islands.bed', sep='\t', header=False, index=False)
+shores_df.to_csv('shores.bed', sep='\t', header=False, index=False)
+shelves_df.to_csv('shelves.bed', sep='\t', header=False, index=False)
+seas_df.to_csv('seas.bed', sep='\t', header=False, index=False)
+
+#%% calculate methylations locations
+methyalation_df['location'] = (methyalation_df['stop'] - methyalation_df['start'])/2 + methyalation_df['start']
+methyalation_df['location'] = methyalation_df['location'].apply(lambda x: int(x))
 
 
 
